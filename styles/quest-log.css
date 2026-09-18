@@ -96,6 +96,13 @@
   font-size: 13px;
 }
 
+/* Foundry's core CSS fixes <select> at a 27px height; combined with our
+   own padding that leaves too little room for a 13px line and clips the
+   top and bottom of the text (e.g. "Night" reading as "Nicht"). */
+.quest-log-root select {
+  height: auto;
+}
+
 /* Chrome renders a <select>'s open dropdown list using whatever
    background/color is set directly on each <option> (it doesn't inherit
    the closed control's styling), so without this it falls back to a
@@ -657,6 +664,10 @@
 
 .ql-new-quest-row .ql-panel {
   margin: 12px 0 0 0;
+}
+
+.ql-edit-quest-form {
+  margin: 0;
 }
 
 .ql-spotlight-btn {
