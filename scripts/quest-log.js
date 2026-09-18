@@ -134,6 +134,10 @@ function loadQuestData() {
   data.theme ??= "dark";
   data.segmentDay ??= { filled: 3, total: 6 };
   data.segmentNight ??= { filled: 1, total: 6 };
+  // Belt and braces: filled should never be able to persist above total,
+  // whatever wrote it last.
+  data.segmentDay.filled = Math.max(0, Math.min(data.segmentDay.total, data.segmentDay.filled));
+  data.segmentNight.filled = Math.max(0, Math.min(data.segmentNight.total, data.segmentNight.filled));
   return data;
 }
 
@@ -230,11 +234,20 @@ function isSegmentedCycleActive() {
 // that name already exists, and never throws if it doesn't; Quest Log's
 // own segmentDay/segmentNight values (above) remain the source of truth
 // either way, and the "Filled" hook below reads changes back in.
+// Set right before we write to Segmented Cycle's own setting, and read by
+// the updateSetting hook below to recognise "that change was just us" and
+// skip reacting to it. Without this, our own write bounces back through
+// applySegmentTick and gets applied a second time, since Foundry's
+// updateSetting hook can't otherwise tell our writes apart from someone
+// else's (the real widget, a macro, another client).
+const _scEchoGuard = { day: false, night: false, custom: false };
+
 function trySyncSegmentedCycleFilled(bar, value) {
   if (!game.user.isGM || !isSegmentedCycleActive() || !SEGMENT_BARS.includes(bar)) return;
   const key = `${bar}Filled`;
   try {
     if (game.settings.settings.has(`${SC_MODULE_ID}.${key}`)) {
+      _scEchoGuard[bar] = true;
       game.settings.set(SC_MODULE_ID, key, value);
     }
   } catch (err) {
@@ -433,6 +446,11 @@ class QuestLogApp extends Application {
 
     this.showAddForm = false;
     this.draft = { title: "", tab: "main", category: "", summary: "" };
+
+    // Editing an already-logged quest's own title/section/category/summary,
+    // as opposed to the "add new quest" form above.
+    this.editingQuestId = null;
+    this._editDrafts = {};
 
     this.showCatInput = false;
     this.catDraft = "";
@@ -701,6 +719,11 @@ class QuestLogApp extends Application {
 
     const dayNightIcon = q.segment.enabled && (q.segment.bar === "day" || q.segment.bar === "night") ? q.segment.bar : null;
 
+    const isEditing = this.editingQuestId === q.id;
+    const editDraft = this._editDrafts[q.id] || { title: q.title, tab: tabKey, category: q.category, summary: q.summary };
+    const editSectionOptions = Object.keys(data.tabs).map((key) => ({ key, label: data.tabs[key].label, selected: key === editDraft.tab }));
+    const editCategoryOptions = (data.tabs[editDraft.tab]?.categories || []).map((c) => ({ value: c, selected: c === editDraft.category }));
+
     return {
       id: q.id,
       tabKey,
@@ -720,6 +743,11 @@ class QuestLogApp extends Application {
       isDayLinked: dayNightIcon === "day",
       isNightLinked: dayNightIcon === "night",
       showSpotlight: isGm,
+      showEditButton: isGm,
+      isEditing,
+      editDraft,
+      editSectionOptions,
+      editCategoryOptions,
 
       showSegmentChip: isGm && q.segment.enabled && effectiveShowSegmentSection,
       segmentSummary: `${q.segment.ticked}/${q.segment.allocated} (${SEGMENT_BAR_LABELS[q.segment.bar] || "Day"})`,
@@ -985,6 +1013,47 @@ class QuestLogApp extends Application {
         if (!loc) return;
         data.tabs[loc.tabKey].quests.splice(loc.idx, 1);
         if (this.expandedId === questId) this.expandedId = null;
+        if (this.editingQuestId === questId) this.editingQuestId = null;
+        saveQuestData(data);
+      }); break;
+
+      case "edit-quest": this._guardGm(() => {
+        const data = loadQuestData();
+        const loc = findQuestLocation(data, questId);
+        if (!loc) return;
+        const quest = data.tabs[loc.tabKey].quests[loc.idx];
+        this.editingQuestId = questId;
+        this._editDrafts[questId] = { title: quest.title, tab: loc.tabKey, category: quest.category, summary: quest.summary };
+        this.expandedId = questId;
+        this.render(false);
+      }); break;
+      case "cancel-edit-quest": {
+        delete this._editDrafts[questId];
+        this.editingQuestId = null;
+        this.render(false);
+        break;
+      }
+      case "confirm-edit-quest": this._guardGm(() => {
+        const draft = this._editDrafts[questId];
+        if (!draft) { this.editingQuestId = null; this.render(false); return; }
+        const title = draft.title.trim();
+        if (!title) return;
+        const data = loadQuestData();
+        const loc = findQuestLocation(data, questId);
+        if (!loc) return;
+        const quest = data.tabs[loc.tabKey].quests[loc.idx];
+        quest.title = title;
+        quest.category = draft.category || "Uncategorised";
+        quest.summary = draft.summary.trim() || "No summary yet.";
+        // Moving sections: pull the quest out of its old tab and into the
+        // new one, same as if it had been logged there originally.
+        if (draft.tab && draft.tab !== loc.tabKey && data.tabs[draft.tab]) {
+          data.tabs[loc.tabKey].quests.splice(loc.idx, 1);
+          data.tabs[draft.tab].quests.push(quest);
+          this.activeTab = draft.tab;
+        }
+        delete this._editDrafts[questId];
+        this.editingQuestId = null;
         saveQuestData(data);
       }); break;
 
@@ -999,7 +1068,6 @@ class QuestLogApp extends Application {
         quest.updates.push({ id: `n${data.nextNoteId++}`, text, dateWritten: today, revealed: false, dateRevealed: null });
         this._updateDrafts[questId] = "";
         saveQuestData(data);
-        ChatMessage.create({ content: `<p><strong>${quest.title}</strong> was updated.</p>` });
       }); break;
       case "toggle-reveal": this._guardGm(() => {
         const noteId = el.dataset.noteId;
@@ -1008,12 +1076,19 @@ class QuestLogApp extends Application {
         if (!loc) return;
         const quest = data.tabs[loc.tabKey].quests[loc.idx];
         const today = currentDateLabel(data);
+        let justRevealed = false;
         quest.updates = quest.updates.map((n) => {
           if (n.id !== noteId) return n;
           const revealed = !n.revealed;
+          justRevealed = revealed;
           return { ...n, revealed, dateRevealed: revealed ? today : n.dateRevealed };
         });
         saveQuestData(data);
+        // The party should be told when an update is actually revealed to
+        // them, not when the GM first writes it (or if they un-reveal it).
+        if (justRevealed) {
+          ChatMessage.create({ content: `<p><strong>${quest.title}</strong> was updated.</p>` });
+        }
       }); break;
       case "delete-update": this._guardGm(() => {
         const noteId = el.dataset.noteId;
@@ -1118,6 +1193,19 @@ class QuestLogApp extends Application {
       }
       case "draft-category-change": this.draft.category = el.value; break;
       case "draft-summary-change": this.draft.summary = el.value; break;
+
+      case "edit-title-change": { if (this._editDrafts[questId]) this._editDrafts[questId].title = el.value; return; }
+      case "edit-tab-change": {
+        const data = loadQuestData();
+        const draft = this._editDrafts[questId];
+        if (!draft) return;
+        draft.tab = el.value;
+        draft.category = (data.tabs[el.value]?.categories || [])[0] || "";
+        this.render(false);
+        return;
+      }
+      case "edit-category-change": { if (this._editDrafts[questId]) this._editDrafts[questId].category = el.value; return; }
+      case "edit-summary-change": { if (this._editDrafts[questId]) this._editDrafts[questId].summary = el.value; return; }
 
       case "cat-draft-change": this.catDraft = el.value; break;
       case "new-tab-draft-change": this.newTabDraft = el.value; break;
@@ -1346,8 +1434,14 @@ class QuestLogDockWidget extends Application {
   activateListeners(html) {
     super.activateListeners(html);
     const root = html[0];
-    root.addEventListener("click", (ev) => this.parentApp._onClick(ev));
-    root.addEventListener("change", (ev) => this.parentApp._onChange(ev));
+    // Route the action to the main app's own handling (so every action
+    // behaves identically whether it's triggered from here or from the
+    // main window), then also re-render this widget itself. A lot of what
+    // these widgets show (month nav, selected day, drafts) lives only on
+    // the main app's instance and is never written to the world setting,
+    // so nothing else would ever tell this widget to redraw.
+    root.addEventListener("click", (ev) => { this.parentApp._onClick(ev); if (this.rendered) this.render(false); });
+    root.addEventListener("change", (ev) => { this.parentApp._onChange(ev); if (this.rendered) this.render(false); });
   }
 
   async close(options) {
@@ -1454,12 +1548,28 @@ Hooks.on("updateSetting", (setting) => {
 
   if (key === `${MODULE_ID}.data`) {
     if (app?.rendered) app.render(false);
+    // The docked Calendar/Segment windows don't automatically pick up a
+    // change made anywhere else (e.g. force-ticking a segment from the
+    // main window, or a player's action arriving over the socket) unless
+    // told to redraw explicitly.
+    if (app?.segmentWidget?.rendered) app.segmentWidget.render(false);
+    if (app?.calendarWidget?.rendered) app.calendarWidget.render(false);
     return;
   }
 
   if (key.startsWith(`${SC_MODULE_ID}.`)) {
     const settingName = key.split(".")[1];
     const bar = settingName?.endsWith("Filled") ? settingName.replace("Filled", "") : null;
-    if (bar && SEGMENT_BARS.includes(bar)) applySegmentTick(bar, setting.value);
+    if (!bar || !SEGMENT_BARS.includes(bar)) return;
+    // Ignore the echo of our own write-back (see trySyncSegmentedCycleFilled):
+    // without this, Quest Log's own change bounces back through Segmented
+    // Cycle's setting and re-applies itself a second time, which is what
+    // was pushing a bar's filled count past its total instead of rolling
+    // over into the other bar.
+    if (_scEchoGuard[bar]) {
+      _scEchoGuard[bar] = false;
+      return;
+    }
+    applySegmentTick(bar, setting.value);
   }
 });
