@@ -313,6 +313,15 @@
 
           <span class="ql-date-logged">{{this.dateLogged}}</span>
 
+          {{#if this.showEditButton}}
+            <button type="button" data-action="edit-quest" title="Edit quest" class="ql-ghost-icon ql-spotlight-btn">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#c9a227" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 20h9"></path>
+                <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"></path>
+              </svg>
+            </button>
+          {{/if}}
+
           {{#if this.showSpotlight}}
             <button type="button" data-action="spotlight-quest" data-tab-key="{{this.tabKey}}" title="Show players this quest" class="ql-ghost-icon ql-spotlight-btn">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#c9a227" stroke-width="1.8">
@@ -327,7 +336,46 @@
 
         {{#if this.isExpanded}}
           <div class="ql-quest-body">
-            <p class="ql-summary-text">{{this.summary}}</p>
+            {{#if this.isEditing}}
+              <div class="ql-panel ql-edit-quest-form">
+                <span class="ql-panel-title">Edit Quest</span>
+
+                <div class="ql-form-row">
+                  <label class="ql-field ql-grow-2">
+                    Title
+                    <input type="text" data-action="edit-title-change" data-quest-id="{{this.id}}" value="{{this.editDraft.title}}">
+                  </label>
+                  <label class="ql-field ql-grow-1">
+                    Section
+                    <select data-action="edit-tab-change" data-quest-id="{{this.id}}">
+                      {{#each this.editSectionOptions}}
+                        <option value="{{this.key}}" {{#if this.selected}}selected{{/if}}>{{this.label}}</option>
+                      {{/each}}
+                    </select>
+                  </label>
+                  <label class="ql-field ql-grow-1">
+                    Category
+                    <select data-action="edit-category-change" data-quest-id="{{this.id}}">
+                      {{#each this.editCategoryOptions}}
+                        <option value="{{this.value}}" {{#if this.selected}}selected{{/if}}>{{this.value}}</option>
+                      {{/each}}
+                    </select>
+                  </label>
+                </div>
+
+                <label class="ql-field">
+                  Summary (shown in the collapsed row)
+                  <input type="text" data-action="edit-summary-change" data-quest-id="{{this.id}}" value="{{this.editDraft.summary}}">
+                </label>
+
+                <div class="ql-form-actions">
+                  <button type="button" data-action="cancel-edit-quest" data-quest-id="{{this.id}}" class="ql-ghost-btn">Cancel</button>
+                  <button type="button" data-action="confirm-edit-quest" data-quest-id="{{this.id}}" class="ql-primary-btn">Save Changes</button>
+                </div>
+              </div>
+            {{else}}
+              <p class="ql-summary-text">{{this.summary}}</p>
+            {{/if}}
 
             {{#if this.showGmSection}}
               <div class="ql-block ql-updates-block">
