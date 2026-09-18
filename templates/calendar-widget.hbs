@@ -1,0 +1,58 @@
+<div class="quest-log-root ql-dock-root ql-theme-{{theme}}">
+  <div class="ql-calendar-panel ql-dock-panel">
+    <div class="ql-calendar-panel-header">
+      <span>Calendar</span>
+    </div>
+
+    <div class="ql-calendar-panel-body">
+      <div class="ql-popover-nav">
+        <button type="button" data-action="cal-prev-month" class="ql-icon-btn">&#8592;</button>
+        <span class="ql-popover-month">{{calendarMonthLabel}}</span>
+        <button type="button" data-action="cal-next-month" class="ql-icon-btn">&#8594;</button>
+      </div>
+      <button type="button" data-action="cal-today" class="ql-ghost-btn ql-center">Jump to today</button>
+
+      <div class="ql-day-grid">
+        {{#each calendarCells}}
+          <button type="button" data-action="select-calendar-day" data-key="{{this.key}}" data-year="{{this.year}}" data-month="{{this.monthIndex}}" data-day="{{this.day}}" style="{{this.style}}">
+            {{this.day}}
+            {{#if this.hasMarks}}<span class="ql-mark-dot"></span>{{/if}}
+          </button>
+        {{/each}}
+      </div>
+
+      <span class="ql-hint">Click a date to view notes and linked quest deadlines.</span>
+
+      {{#if hasSelectedCalendarDay}}
+        <div class="ql-cal-selected">
+          <span class="ql-cal-selected-label">{{selectedCalendarDayLabel}}</span>
+
+          {{#if hasSelectedLinkedQuests}}
+            {{#each selectedLinkedQuests}}
+              <div class="ql-cal-linked-quest">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#C9A227" stroke-width="2"><circle cx="12" cy="12" r="9"></circle></svg>
+                {{this.title}} <span class="ql-muted">· {{this.tabLabel}}</span>
+              </div>
+            {{/each}}
+          {{/if}}
+
+          {{#each selectedCalendarEvents}}
+            <div class="ql-cal-event">
+              <span class="ql-cal-event-text">{{this.text}}</span>
+              {{#if ../isGm}}
+                <button type="button" data-action="delete-calendar-event" data-key="{{../selectedCalendarDay}}" data-id="{{this.id}}" class="ql-x-btn">&times;</button>
+              {{/if}}
+            </div>
+          {{/each}}
+
+          {{#if isGm}}
+            <div class="ql-inline-form">
+              <input type="text" data-action="calendar-event-draft-change" value="{{calendarEventDraft}}" placeholder="Add a note for this date...">
+              <button type="button" data-action="add-calendar-event" class="ql-small-btn">Add</button>
+            </div>
+          {{/if}}
+        </div>
+      {{/if}}
+    </div>
+  </div>
+</div>

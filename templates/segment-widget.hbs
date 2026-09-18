@@ -1,0 +1,40 @@
+<div class="quest-log-root ql-dock-root ql-theme-{{theme}}">
+  <div class="ql-daynight-panel ql-dock-panel">
+    <div class="ql-daynight-row">
+      <div class="ql-daynight-row-head">
+        <span>Day</span>
+        <div class="ql-daynight-controls">
+          <span class="ql-daynight-count">{{daySegments.label}}</span>
+          {{#if isGm}}
+            <button type="button" data-action="segment-day-dec" class="ql-pip-btn ql-tiny">&minus;</button>
+            <button type="button" data-action="segment-day-inc" class="ql-pip-btn ql-tiny">+</button>
+            <button type="button" data-action="segment-day-reset" class="ql-small-btn ql-ghost ql-tiny">Reset</button>
+          {{/if}}
+        </div>
+      </div>
+      <div class="ql-daynight-cells">
+        {{#each daySegments.cells}}
+          <span data-action="segment-day-cell" data-n="{{this.n}}" style="{{this.style}}"></span>
+        {{/each}}
+      </div>
+    </div>
+    <div class="ql-daynight-row">
+      <div class="ql-daynight-row-head">
+        <span>Night</span>
+        <div class="ql-daynight-controls">
+          <span class="ql-daynight-count">{{nightSegments.label}}</span>
+          {{#if isGm}}
+            <button type="button" data-action="segment-night-dec" class="ql-pip-btn ql-tiny">&minus;</button>
+            <button type="button" data-action="segment-night-inc" class="ql-pip-btn ql-tiny">+</button>
+            <button type="button" data-action="segment-night-reset" class="ql-small-btn ql-ghost ql-tiny">Reset</button>
+          {{/if}}
+        </div>
+      </div>
+      <div class="ql-daynight-cells">
+        {{#each nightSegments.cells}}
+          <span data-action="segment-night-cell" data-n="{{this.n}}" style="{{this.style}}"></span>
+        {{/each}}
+      </div>
+    </div>
+  </div>
+</div>
