@@ -97,6 +97,14 @@ function defaultData() {
     currentDateObj: { year: 812, monthIndex: 1, day: 9 },
     calendarEvents: {},
     segmentBarPrevFilled: { day: 0, night: 0, custom: 0 },
+    theme: "dark",
+    // Quest Log's own record of the Day/Night segment track, shown as two bars
+    // in the calendar panel. Kept here (rather than only read from Segmented
+    // Cycle) so the panel still works if that module doesn't expose the
+    // setting names below; segment-day-*/segment-night-* actions keep this
+    // and Segmented Cycle's own settings in step on a best-effort basis.
+    segmentDay: { filled: 3, total: 6 },
+    segmentNight: { filled: 1, total: 6 },
     tabs: {
       main: { label: "Main Quest", categories: [], quests: [] },
       side: { label: "Side Quest", categories: [], quests: [] },
@@ -123,6 +131,9 @@ function loadQuestData() {
   data.useSimpleCalendar ??= true;
   data.calendarEvents ??= {};
   data.segmentBarPrevFilled ??= { day: 0, night: 0, custom: 0 };
+  data.theme ??= "dark";
+  data.segmentDay ??= { filled: 3, total: 6 };
+  data.segmentNight ??= { filled: 1, total: 6 };
   return data;
 }
 
@@ -159,8 +170,76 @@ function currentDateLabel(data) {
   return formatDate(data.calendar, data.currentDateObj);
 }
 
+// Simple Calendar's own months, in the { name, days } shape Quest Log's
+// date helpers already understand.
+function simpleCalendarMonths() {
+  try {
+    const months = window.SimpleCalendar.api.getAllMonths();
+    return months.map((m) => ({ name: m.name, days: m.numberOfDays }));
+  } catch (err) {
+    console.warn(`${MODULE_ID} | Could not read months from Simple Calendar`, err);
+    return null;
+  }
+}
+
+function simpleCalendarYearPostfix() {
+  try {
+    return window.SimpleCalendar.api.getCurrentYear()?.postfix || "";
+  } catch (err) {
+    return "";
+  }
+}
+
+// Simple Calendar's month/day are 0-indexed; Quest Log's own date objects
+// use a 0-indexed monthIndex but a 1-indexed day, so only day needs the +1.
+function simpleCalendarCurrentDateObj() {
+  try {
+    const dt = window.SimpleCalendar.api.currentDateTime();
+    return { year: dt.year, monthIndex: dt.month, day: dt.day + 1 };
+  } catch (err) {
+    console.warn(`${MODULE_ID} | Could not read the current date from Simple Calendar`, err);
+    return null;
+  }
+}
+
+// The calendar (months + label) and "today" that the grid, month nav, and
+// quest date pickers should actually use. When synced to Simple Calendar
+// this is pulled live from Simple Calendar itself, so the grid never shows
+// a different calendar than the date already shown in the top bar; when
+// not synced (or Simple Calendar's data isn't readable) it falls back to
+// Quest Log's own internal calendar, same as before.
+function effectiveCalendar(data) {
+  if (data.useSimpleCalendar && isSimpleCalendarActive()) {
+    const months = simpleCalendarMonths();
+    const dateObj = simpleCalendarCurrentDateObj();
+    if (months && months.length && dateObj) {
+      return { calendar: { months, yearLabel: simpleCalendarYearPostfix() }, dateObj, live: true };
+    }
+  }
+  return { calendar: data.calendar, dateObj: data.currentDateObj, live: false };
+}
+
 function isSegmentedCycleActive() {
   return !!game.modules.get(SC_MODULE_ID)?.active;
+}
+
+// Best-effort write-back to Segmented Cycle's own "Filled" settings, so a
+// GM adjusting the Day/Night bars from inside Quest Log also moves the
+// real module's own widget. Segmented Cycle's exact setting keys aren't
+// something Quest Log controls, so this only writes when a setting of
+// that name already exists, and never throws if it doesn't; Quest Log's
+// own segmentDay/segmentNight values (above) remain the source of truth
+// either way, and the "Filled" hook below reads changes back in.
+function trySyncSegmentedCycleFilled(bar, value) {
+  if (!game.user.isGM || !isSegmentedCycleActive() || !SEGMENT_BARS.includes(bar)) return;
+  const key = `${bar}Filled`;
+  try {
+    if (game.settings.settings.has(`${SC_MODULE_ID}.${key}`)) {
+      game.settings.set(SC_MODULE_ID, key, value);
+    }
+  } catch (err) {
+    console.warn(`${MODULE_ID} | Could not sync ${bar} segment back to Segmented Cycle`, err);
+  }
 }
 
 // Called whenever one of Segmented Cycle's *Filled settings changes. Any
@@ -174,6 +253,12 @@ async function applySegmentTick(bar, newFilled) {
   const prev = data.segmentBarPrevFilled[bar] ?? 0;
   const delta = newFilled - prev;
   data.segmentBarPrevFilled[bar] = newFilled;
+
+  // Mirror the real module's Day/Night fill into Quest Log's own bars so
+  // the calendar panel stays in step when the change came from elsewhere
+  // (the real widget, another macro, etc.), not just from Quest Log itself.
+  if (bar === "day") data.segmentDay.filled = Math.max(0, Math.min(data.segmentDay.total, newFilled));
+  if (bar === "night") data.segmentNight.filled = Math.max(0, Math.min(data.segmentNight.total, newFilled));
 
   if (delta > 0) {
     for (const tabKey of Object.keys(data.tabs)) {
@@ -216,10 +301,33 @@ function requestAddPlayerNote(questId, text) {
   game.socket.emit(SOCKET_NAME, { action: "addPlayerNote", questId, text, author: game.user.name });
 }
 
+function requestSpotlightQuest(questId, tabKey, title) {
+  game.socket.emit(SOCKET_NAME, { action: "spotlightQuest", questId, tabKey, title, from: game.user.name });
+  spotlightQuestLocal(questId, tabKey);
+}
+
+function spotlightQuestLocal(questId, tabKey) {
+  if (!app) app = new QuestLogApp();
+  if (!app.rendered) app.render(true);
+  app.activeTab = tabKey;
+  app.expandedId = questId;
+  app.render(false);
+  app.bringToTop?.();
+}
+
 function onSocketMessage(msg) {
-  if (!game.user.isGM || !msg) return;
-  if (msg.action === "addPlayerNote") {
+  if (!msg) return;
+
+  // GM-only handlers: a player asking the GM's client to write shared data.
+  if (game.user.isGM && msg.action === "addPlayerNote") {
     addPlayerNoteLocal(msg.questId, msg.author, msg.text);
+    return;
+  }
+
+  // Broadcast to everyone, including whoever sent it (harmless no-op there
+  // since spotlightQuestLocal already ran for them synchronously).
+  if (msg.action === "spotlightQuest" && msg.from !== game.user.name) {
+    spotlightQuestLocal(msg.questId, msg.tabKey);
   }
 }
 
@@ -294,6 +402,21 @@ function buildSegmentPips(segment) {
   return pips;
 }
 
+// The two ever-present Day/Night bars in the calendar panel. `interactive`
+// is only true for a real GM not previewing as a player: players (and a
+// previewing GM) see the same bars read-only.
+function buildDayNightCells(segState, color, interactive) {
+  const cells = [];
+  for (let i = 0; i < segState.total; i++) {
+    const on = i < segState.filled;
+    cells.push({
+      n: i,
+      style: `flex:1; height:10px; border-radius:2px; background:${on ? color : "rgba(120,110,90,0.25)"}; border:1px solid rgba(201,162,39,0.3);${interactive ? " cursor:pointer;" : ""}`,
+    });
+  }
+  return { cells, label: `${segState.filled} / ${segState.total}`, interactive };
+}
+
 /* =========================================================================
    The application itself. Persistent data (quests, tabs, calendar, events)
    lives in the world setting above; everything here on the instance is
@@ -320,8 +443,16 @@ class QuestLogApp extends Application {
     this.newTabDraft = "";
 
     this.configOpen = false;
+    this.viewAsPlayer = false;
 
-    this.calendarPanelOpen = true;
+    // The Calendar and Segmented Cycle panels are their own small floating
+    // windows, docked to the right edge of this one; these two flags are
+    // just "is that satellite window open", the widgets themselves live in
+    // calendarWidget/segmentWidget below.
+    this.calendarPanelOpen = false;
+    this.segmentPanelOpen = false;
+    this.calendarWidget = null;
+    this.segmentWidget = null;
     this.calendarViewMonth = null;
     this.selectedCalendarDay = null;
     this.calendarEventDraft = "";
@@ -351,15 +482,39 @@ class QuestLogApp extends Application {
 
   getData() {
     const data = loadQuestData();
-    const isGm = game.user.isGM;
+    const realIsGm = game.user.isGM;
+    // Everything permission-gated below uses this: a GM previewing as a
+    // player sees exactly what a player would, while the toggle itself
+    // (and anything about the preview state) still checks realIsGm.
+    const isGm = realIsGm && !this.viewAsPlayer;
     const calendar = data.calendar;
 
-    if (!this.calendarViewMonth) this.calendarViewMonth = { year: data.currentDateObj.year, monthIndex: data.currentDateObj.monthIndex };
+    const scSynced = !!(data.useSimpleCalendar && isSimpleCalendarActive());
+    const { calendar: activeCalendar, dateObj: activeDateObj } = effectiveCalendar(data);
+    const gridData = { ...data, calendar: activeCalendar, currentDateObj: activeDateObj };
+
+    // Reset the panel's month view to "today" whenever it's uninitialised,
+    // out of range for whichever calendar is active, or sync was just
+    // switched on/off — otherwise it can keep pointing at a month index
+    // that belongs to the other calendar entirely.
+    if (
+      !this.calendarViewMonth ||
+      this.calendarViewMonth.monthIndex >= activeCalendar.months.length ||
+      this._calendarViewSynced !== scSynced
+    ) {
+      this.calendarViewMonth = { year: activeDateObj.year, monthIndex: activeDateObj.monthIndex };
+    }
+    this._calendarViewSynced = scSynced;
+
     if (!this.jumpView) this.jumpView = { year: data.currentDateObj.year, monthIndex: data.currentDateObj.monthIndex };
 
-    const scSynced = !!(data.useSimpleCalendar && isSimpleCalendarActive());
     const segmentModuleActive = isSegmentedCycleActive();
     const effectiveShowSegmentSection = data.showSegmentSection && segmentModuleActive;
+
+    const segmentToggleVisible = effectiveShowSegmentSection && data.showCalendarSection;
+    const segmentPanelOpen = segmentToggleVisible && this.segmentPanelOpen;
+    const daySegments = buildDayNightCells(data.segmentDay, "#e8c468", isGm);
+    const nightSegments = buildDayNightCells(data.segmentNight, "#7d8fc9", isGm);
 
     const activeTab = this.activeTab;
     const isFinished = activeTab === "finished";
@@ -392,13 +547,14 @@ class QuestLogApp extends Application {
       const entries = this._getFinishedEntries(data);
       categorySource = [...new Set(entries.map((e) => e.quest.category))].sort();
       const filtered = activeCat === "all" ? entries : entries.filter((e) => e.quest.category === activeCat);
-      questCards = filtered.map((e) => this._makeQuestCard(data, e.quest, this.expandedId === e.quest.id, e.originLabel, isGm, effectiveShowSegmentSection, scSynced));
+      questCards = filtered.map((e) => this._makeQuestCard(gridData, e.quest, this.expandedId === e.quest.id, e.originLabel, isGm, effectiveShowSegmentSection, scSynced, e.tabKey));
     } else {
-      const tab = data.tabs[activeTab] || data.tabs[realTabOrder[0]];
+      const tabKeyForCards = data.tabs[activeTab] ? activeTab : realTabOrder[0];
+      const tab = data.tabs[tabKeyForCards];
       categorySource = tab.categories;
       const activeQuests = tab.quests.filter((q) => q.status === "active");
       const filtered = activeCat === "all" ? activeQuests : activeQuests.filter((q) => q.category === activeCat);
-      questCards = filtered.map((q) => this._makeQuestCard(data, q, this.expandedId === q.id, null, isGm, effectiveShowSegmentSection, scSynced));
+      questCards = filtered.map((q) => this._makeQuestCard(gridData, q, this.expandedId === q.id, null, isGm, effectiveShowSegmentSection, scSynced, tabKeyForCards));
     }
 
     const categoryChips = [{ key: "all", label: "All", active: activeCat === "all" }, ...categorySource.map((c) => ({ key: c, label: c, active: activeCat === c }))].map((chip) => ({
@@ -408,7 +564,7 @@ class QuestLogApp extends Application {
     }));
 
     const sectionOptions = realTabOrder.map((key) => ({ key, label: data.tabs[key].label }));
-    const monthOptions = buildMonthOptions(calendar.months, -1);
+    const monthOptions = buildMonthOptions(activeCalendar.months, -1);
 
     const monthRows = calendar.months.map((m, i) => ({ idx: i, name: m.name, days: m.days, canDelete: calendar.months.length > 1 }));
 
@@ -416,9 +572,9 @@ class QuestLogApp extends Application {
     const jumpMonthLabel = `${jumpMonth.name}, ${this.jumpView.year} ${calendar.yearLabel}`;
     const jumpCells = buildDayCells(data, this.jumpView.year, this.jumpView.monthIndex, null);
 
-    const calMonth = calendar.months[this.calendarViewMonth.monthIndex] || calendar.months[0];
-    const calendarMonthLabel = `${calMonth.name}, ${this.calendarViewMonth.year} ${calendar.yearLabel}`;
-    const calendarCells = buildDayCells(data, this.calendarViewMonth.year, this.calendarViewMonth.monthIndex, this.selectedCalendarDay);
+    const calMonth = activeCalendar.months[this.calendarViewMonth.monthIndex] || activeCalendar.months[0];
+    const calendarMonthLabel = `${calMonth.name}, ${this.calendarViewMonth.year} ${activeCalendar.yearLabel}`;
+    const calendarCells = buildDayCells(gridData, this.calendarViewMonth.year, this.calendarViewMonth.monthIndex, this.selectedCalendarDay);
 
     let selectedCalendarDayLabel = "";
     let selectedCalendarEvents = [];
@@ -426,13 +582,22 @@ class QuestLogApp extends Application {
     if (this.selectedCalendarDay) {
       const parts = this.selectedCalendarDay.split("-").map((n) => parseInt(n, 10));
       const selDate = { year: parts[0], monthIndex: parts[1], day: parts[2] };
-      selectedCalendarDayLabel = formatDate(calendar, selDate);
+      selectedCalendarDayLabel = formatDate(activeCalendar, selDate);
       selectedCalendarEvents = data.calendarEvents[this.selectedCalendarDay] || [];
       selectedLinkedQuests = getQuestsLinkedToDate(data, selDate);
     }
 
     return {
       isGm,
+      realIsGm,
+      viewAsPlayer: this.viewAsPlayer,
+      viewToggleLabel: this.viewAsPlayer ? "Exit Preview" : "Preview as Player",
+      theme: data.theme,
+      themeOptions: [
+        { key: "dark", label: "Dark" },
+        { key: "light", label: "Light" },
+        { key: "parchment", label: "Parchment" },
+      ].map((t) => ({ ...t, active: t.key === data.theme })),
       currentDate: currentDateLabel(data),
       scActive: isSimpleCalendarActive(),
       scSynced,
@@ -442,6 +607,10 @@ class QuestLogApp extends Application {
       segmentModuleActive,
       showSegmentSection: data.showSegmentSection,
       effectiveShowSegmentSection,
+      segmentToggleVisible,
+      segmentPanelOpen,
+      daySegments,
+      nightSegments,
 
       configOpen: this.configOpen,
       calendarYearLabel: calendar.yearLabel,
@@ -453,8 +622,6 @@ class QuestLogApp extends Application {
       jumpCells,
 
       calendarPanelOpen: this.calendarPanelOpen,
-      calendarToggleIcon: this.calendarPanelOpen ? "▾" : "▸",
-      calendarHeaderRadius: this.calendarPanelOpen ? "10px 10px 0 0" : "10px",
       calendarMonthLabel,
       calendarCells,
       hasSelectedCalendarDay: !!this.selectedCalendarDay,
@@ -490,18 +657,18 @@ class QuestLogApp extends Application {
     for (const key of Object.keys(data.tabs)) {
       const tab = data.tabs[key];
       for (const q of tab.quests) {
-        if (q.status !== "active") entries.push({ quest: q, originLabel: tab.label });
+        if (q.status !== "active") entries.push({ quest: q, originLabel: tab.label, tabKey: key });
       }
     }
     return entries;
   }
 
-  _makeQuestCard(data, q, isExpanded, originLabel, isGm, effectiveShowSegmentSection, scSynced) {
+  _makeQuestCard(data, q, isExpanded, originLabel, isGm, effectiveShowSegmentSection, scSynced, tabKey) {
     const finished = q.status !== "active";
     const statusColor = q.status === "active" ? "#C9A227" : q.status === "completed" ? "#5a9c6a" : "#8B0000";
     const titleStyle = finished
       ? `color:${statusColor}; text-decoration:line-through; text-decoration-thickness:2px; opacity:0.75;`
-      : "color:#f0e9d8;";
+      : "color:var(--ql-text);";
 
     const revealedNotes = q.updates.filter((n) => n.revealed);
     const updates = q.updates.map((n) => ({
@@ -532,8 +699,11 @@ class QuestLogApp extends Application {
       };
     }
 
+    const dayNightIcon = q.segment.enabled && (q.segment.bar === "day" || q.segment.bar === "night") ? q.segment.bar : null;
+
     return {
       id: q.id,
+      tabKey,
       title: q.title,
       titleStyle,
       category: q.category,
@@ -544,8 +714,12 @@ class QuestLogApp extends Application {
       dateLogged: q.dateLogged,
       isExpanded,
       chevron: isExpanded ? "▾" : "▸",
-      cardStyle: `background:rgba(255,255,255,0.035); border:1px solid rgba(255,255,255,0.1); border-left:3px solid ${statusColor}; border-radius:10px; overflow:hidden;`,
+      cardStyle: `border-left:3px solid ${statusColor};`,
       dotStyle: `width:9px; height:9px; border-radius:50%; background:${statusColor}; flex:0 0 auto;`,
+
+      isDayLinked: dayNightIcon === "day",
+      isNightLinked: dayNightIcon === "night",
+      showSpotlight: isGm,
 
       showSegmentChip: isGm && q.segment.enabled && effectiveShowSegmentSection,
       segmentSummary: `${q.segment.ticked}/${q.segment.allocated} (${SEGMENT_BAR_LABELS[q.segment.bar] || "Day"})`,
@@ -606,6 +780,29 @@ class QuestLogApp extends Application {
 
       case "toggle-config": this.configOpen = !this.configOpen; this.render(false); break;
       case "close-config": this.configOpen = false; this.render(false); break;
+      case "toggle-view": this._guardGm(() => { this.viewAsPlayer = !this.viewAsPlayer; this.render(false); }); break;
+      case "set-theme": this._guardGm(() => {
+        const data = loadQuestData();
+        data.theme = el.dataset.theme;
+        saveQuestData(data);
+      }); break;
+
+      case "toggle-segment-panel":
+        this.segmentPanelOpen = !this.segmentPanelOpen;
+        if (this.segmentPanelOpen) this._openSegmentWidget(); else this._closeSegmentWidget();
+        this.render(false);
+        break;
+      case "spotlight-quest": this._guardGm(() => {
+        const tabKey = el.dataset.tabKey;
+        const quest = (() => {
+          const data = loadQuestData();
+          const loc = findQuestLocation(data, questId);
+          return loc ? data.tabs[loc.tabKey].quests[loc.idx] : null;
+        })();
+        if (!quest) return;
+        requestSpotlightQuest(questId, tabKey, quest.title);
+        ChatMessage.create({ content: `<p><strong>${game.i18n?.localize("QUESTLOG.Title") ?? "Shrimps Quest Log"}</strong> — ${game.user.name} is showing everyone <em>${quest.title}</em>.</p>` });
+      }); break;
 
       case "prev-day": this._guardGm(() => this._advanceDate(-1)); break;
       case "next-day": this._guardGm(() => this._advanceDate(1)); break;
@@ -629,7 +826,30 @@ class QuestLogApp extends Application {
         this.render(false);
       }); break;
 
-      case "toggle-calendar-panel": this.calendarPanelOpen = !this.calendarPanelOpen; this.render(false); break;
+      case "toggle-calendar-panel":
+        this.calendarPanelOpen = !this.calendarPanelOpen;
+        if (this.calendarPanelOpen) this._openCalendarWidget(); else this._closeCalendarWidget();
+        this.render(false);
+        break;
+
+      case "segment-day-cell": this._guardGm(() => {
+        const n = Number(el.dataset.n);
+        const data = loadQuestData();
+        const clicked = n + 1;
+        this._setDayNightFilled("day", data.segmentDay.filled === clicked ? n : clicked);
+      }); break;
+      case "segment-night-cell": this._guardGm(() => {
+        const n = Number(el.dataset.n);
+        const data = loadQuestData();
+        const clicked = n + 1;
+        this._setDayNightFilled("night", data.segmentNight.filled === clicked ? n : clicked);
+      }); break;
+      case "segment-day-inc": this._guardGm(() => this._changeDayNightTotal("day", 1)); break;
+      case "segment-day-dec": this._guardGm(() => this._changeDayNightTotal("day", -1)); break;
+      case "segment-day-reset": this._guardGm(() => this._setDayNightFilled("day", 0)); break;
+      case "segment-night-inc": this._guardGm(() => this._changeDayNightTotal("night", 1)); break;
+      case "segment-night-dec": this._guardGm(() => this._changeDayNightTotal("night", -1)); break;
+      case "segment-night-reset": this._guardGm(() => this._setDayNightFilled("night", 0)); break;
       case "cal-prev-month": { const data = loadQuestData(); this.calendarViewMonth = shiftMonth(data.calendar, this.calendarViewMonth, -1); this.render(false); break; }
       case "cal-next-month": { const data = loadQuestData(); this.calendarViewMonth = shiftMonth(data.calendar, this.calendarViewMonth, 1); this.render(false); break; }
       case "cal-today": { const data = loadQuestData(); this.calendarViewMonth = { year: data.currentDateObj.year, monthIndex: data.currentDateObj.monthIndex }; this.render(false); break; }
@@ -779,6 +999,7 @@ class QuestLogApp extends Application {
         quest.updates.push({ id: `n${data.nextNoteId++}`, text, dateWritten: today, revealed: false, dateRevealed: null });
         this._updateDrafts[questId] = "";
         saveQuestData(data);
+        ChatMessage.create({ content: `<p><strong>${quest.title}</strong> was updated.</p>` });
       }); break;
       case "toggle-reveal": this._guardGm(() => {
         const noteId = el.dataset.noteId;
@@ -827,7 +1048,8 @@ class QuestLogApp extends Application {
         const loc = findQuestLocation(data, questId);
         if (!loc) return;
         const quest = data.tabs[loc.tabKey].quests[loc.idx];
-        const base = quest.linkedDate || data.currentDateObj;
+        const { dateObj: activeDateObj } = effectiveCalendar(data);
+        const base = quest.linkedDate || activeDateObj;
         this.questDatePicker = { questId, year: base.year, monthIndex: base.monthIndex, day: base.day };
         this.render(false);
       }); break;
@@ -852,14 +1074,7 @@ class QuestLogApp extends Application {
 
       case "segment-inc": this._guardGm(() => this._changeSegmentAllocated(questId, 1)); break;
       case "segment-dec": this._guardGm(() => this._changeSegmentAllocated(questId, -1)); break;
-      case "segment-tick": this._guardGm(() => {
-        const data = loadQuestData();
-        const loc = findQuestLocation(data, questId);
-        if (!loc) return;
-        const seg = data.tabs[loc.tabKey].quests[loc.idx].segment;
-        seg.ticked = Math.min(seg.allocated, seg.ticked + 1);
-        saveQuestData(data);
-      }); break;
+      case "segment-tick": this._guardGm(() => this._forceTick(questId)); break;
       case "segment-reset": this._guardGm(() => {
         const data = loadQuestData();
         const loc = findQuestLocation(data, questId);
@@ -939,8 +1154,9 @@ class QuestLogApp extends Application {
       case "quest-date-year-change": this.questDatePicker.year = parseInt(el.value, 10) || 0; return;
       case "quest-date-month-change": {
         const data = loadQuestData();
+        const { calendar: activeCalendar } = effectiveCalendar(data);
         const monthIndex = parseInt(el.value, 10) || 0;
-        const maxDay = data.calendar.months[monthIndex]?.days || 30;
+        const maxDay = activeCalendar.months[monthIndex]?.days || 30;
         this.questDatePicker.monthIndex = monthIndex;
         this.questDatePicker.day = Math.min(this.questDatePicker.day, maxDay);
         this.render(false);
@@ -1008,6 +1224,177 @@ class QuestLogApp extends Application {
     seg.allocated = Math.min(20, Math.max(1, seg.allocated + delta));
     seg.ticked = Math.min(seg.ticked, seg.allocated);
     saveQuestData(data);
+  }
+
+  _setDayNightFilled(bar, filled) {
+    const data = loadQuestData();
+    const state = bar === "day" ? data.segmentDay : data.segmentNight;
+    state.filled = Math.max(0, Math.min(state.total, filled));
+    data.segmentBarPrevFilled[bar] = state.filled;
+    saveQuestData(data);
+    trySyncSegmentedCycleFilled(bar, state.filled);
+  }
+
+  _changeDayNightTotal(bar, delta) {
+    const data = loadQuestData();
+    const state = bar === "day" ? data.segmentDay : data.segmentNight;
+    state.total = Math.max(1, Math.min(24, state.total + delta));
+    state.filled = Math.min(state.filled, state.total);
+    saveQuestData(data);
+  }
+
+  // One manual segment of time, for the GM's own quest-linked "Force tick"
+  // button. Ticks the quest's own progress by one and nudges the matching
+  // shared Day/Night bar forward by one, rolling into the other bar if the
+  // linked one is already full — same behaviour validated in the mockup.
+  _forceTick(questId) {
+    const data = loadQuestData();
+    const loc = findQuestLocation(data, questId);
+    if (!loc) return;
+    const seg = data.tabs[loc.tabKey].quests[loc.idx].segment;
+    if (seg.ticked >= seg.allocated) return;
+    seg.ticked += 1;
+
+    if (seg.bar === "day" || seg.bar === "night") {
+      const primary = seg.bar === "day" ? data.segmentDay : data.segmentNight;
+      const secondary = seg.bar === "day" ? data.segmentNight : data.segmentDay;
+      const secondaryBar = seg.bar === "day" ? "night" : "day";
+      if (primary.filled < primary.total) {
+        primary.filled += 1;
+        data.segmentBarPrevFilled[seg.bar] = primary.filled;
+        trySyncSegmentedCycleFilled(seg.bar, primary.filled);
+      } else if (secondary.filled < secondary.total) {
+        secondary.filled += 1;
+        data.segmentBarPrevFilled[secondaryBar] = secondary.filled;
+        trySyncSegmentedCycleFilled(secondaryBar, secondary.filled);
+      }
+    }
+
+    saveQuestData(data);
+  }
+
+  /* ---------------- docked satellite windows ---------------- */
+
+  // Keeps the Calendar/Segment widgets pinned to the right edge of this
+  // window, stacked one above the other when both are open. Called after
+  // opening a widget and whenever this window's own position changes.
+  _positionDockWidgets() {
+    const gap = 10;
+    const left = this.position.left + this.position.width + gap;
+    let top = this.position.top;
+    for (const widget of [this.segmentWidget, this.calendarWidget]) {
+      if (!widget?.rendered) continue;
+      widget.setPosition({ left, top });
+      top += (widget.position.height || 0) + gap;
+    }
+  }
+
+  setPosition(pos) {
+    const result = super.setPosition(pos);
+    this._positionDockWidgets();
+    return result;
+  }
+
+  async _openSegmentWidget() {
+    if (!this.segmentWidget) this.segmentWidget = new SegmentDockWidget(this);
+    if (!this.segmentWidget.rendered) await this.segmentWidget.render(true);
+    this._positionDockWidgets();
+  }
+
+  _closeSegmentWidget() {
+    if (this.segmentWidget?.rendered) this.segmentWidget.close();
+  }
+
+  async _openCalendarWidget() {
+    if (!this.calendarWidget) this.calendarWidget = new CalendarDockWidget(this);
+    if (!this.calendarWidget.rendered) await this.calendarWidget.render(true);
+    this._positionDockWidgets();
+  }
+
+  _closeCalendarWidget() {
+    if (this.calendarWidget?.rendered) this.calendarWidget.close();
+  }
+
+  async close(options) {
+    if (this.segmentWidget?.rendered) await this.segmentWidget.close();
+    if (this.calendarWidget?.rendered) await this.calendarWidget.close();
+    return super.close(options);
+  }
+}
+
+/* =========================================================================
+   Small satellite windows for the Calendar and Segmented Cycle panels.
+   Quest Log opens/closes these itself and keeps them docked to the right
+   edge of the main window (see _positionDockWidgets above) whenever it
+   moves or resizes, so they read as part of the Quest Log window rather
+   than a separate app the person has to manage themselves. Both reuse the
+   main app's own getData()/click/change handling rather than duplicating
+   it, so every action inside them behaves exactly as it does in the main
+   window.
+   ========================================================================= */
+
+class QuestLogDockWidget extends Application {
+  constructor(parentApp, options) {
+    super(options);
+    this.parentApp = parentApp;
+  }
+
+  getData() {
+    return this.parentApp.getData();
+  }
+
+  activateListeners(html) {
+    super.activateListeners(html);
+    const root = html[0];
+    root.addEventListener("click", (ev) => this.parentApp._onClick(ev));
+    root.addEventListener("change", (ev) => this.parentApp._onChange(ev));
+  }
+
+  async close(options) {
+    this._onDockClose();
+    return super.close(options);
+  }
+
+  _onDockClose() {}
+}
+
+class SegmentDockWidget extends QuestLogDockWidget {
+  static get defaultOptions() {
+    return foundry.utils.mergeObject(super.defaultOptions, {
+      id: "shrimps-quest-log-segment-widget",
+      title: "Segmented Cycle",
+      template: `modules/${MODULE_ID}/templates/segment-widget.hbs`,
+      width: 260,
+      height: "auto",
+      resizable: false,
+      classes: ["quest-log-app", "quest-log-dock-widget"],
+    });
+  }
+
+  _onDockClose() {
+    this.parentApp.segmentPanelOpen = false;
+    this.parentApp.segmentWidget = null;
+    if (this.parentApp.rendered) this.parentApp.render(false);
+  }
+}
+
+class CalendarDockWidget extends QuestLogDockWidget {
+  static get defaultOptions() {
+    return foundry.utils.mergeObject(super.defaultOptions, {
+      id: "shrimps-quest-log-calendar-widget",
+      title: "Calendar",
+      template: `modules/${MODULE_ID}/templates/calendar-widget.hbs`,
+      width: 300,
+      height: "auto",
+      resizable: false,
+      classes: ["quest-log-app", "quest-log-dock-widget"],
+    });
+  }
+
+  _onDockClose() {
+    this.parentApp.calendarPanelOpen = false;
+    this.parentApp.calendarWidget = null;
+    if (this.parentApp.rendered) this.parentApp.render(false);
   }
 }
 
