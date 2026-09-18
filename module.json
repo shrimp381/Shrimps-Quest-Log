@@ -2,7 +2,7 @@
   "id": "shrimps-quest-log",
   "title": "Shrimps Quest Log",
   "description": "An interactive quest log with GM/player views, tabs and categories, date stamped updates, party notes, an optional Segmented Cycle tie in, and its own internal calendar (with optional Simple Calendar sync). GM builds and reveals, players read and add notes. Configure from the Shrimps Quest Log tool in the Scene Controls Notes group.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "compatibility": { "minimum": "11", "verified": "13" },
   "authors": [{ "name": "Shrimp381" }],
   "esmodules": ["scripts/quest-log.js"],
@@ -16,5 +16,5 @@
   },
   "url": "https://github.com/shrimp381/Shrimps-Quest-Log",
   "manifest": "https://raw.githubusercontent.com/shrimp381/Shrimps-Quest-Log/main/module.json",
-  "download": "https://github.com/shrimp381/Shrimps-Quest-Log/releases/download/v0.1.0/shrimps-quest-log-release.zip"
+  "download": "https://github.com/shrimp381/Shrimps-Quest-Log/releases/download/v0.2.0/shrimps-quest-log-release.zip"
 }
