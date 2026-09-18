@@ -1,6 +1,6 @@
 # Shrimps Quest Log
 
-An interactive quest log for Distyr, with GM and player views, tabs and categories, dated updates, party notes, an optional Segmented Cycle tie in, and its own internal calendar.
+An interactive quest log, with GM and player views, tabs and categories, dated updates, party notes, an optional Segmented Cycle tie in, and its own internal calendar.
 
 ## What it does
 
@@ -36,20 +36,8 @@ This module has not been submitted anywhere, so install it as a local/manual mod
 
 ## Optional: Simple Calendar
 
-Shrimps Quest Log works fully without it. If Simple Calendar is installed and active, open the settings cog and turn on "Sync the displayed date with Simple Calendar" to have the top of the log show Simple Calendar's current date instead of Shrimps Quest Log's own, for logging and stamping purposes. The calendar panel (the grid, its notes, and quest deadline links) always stays on Shrimps Quest Log's own internal calendar either way, since Simple Calendar doesn't expose enough about its own month/day layout to safely rebuild a matching grid from here.
+Shrimps Quest Log works fully without it. If Simple Calendar is installed and active, open the settings cog and turn on "Sync the displayed date with Simple Calendar" to have the top of the log show Simple Calendar's current date instead of Shrimps Quest Log's own, for logging and stamping purposes.
 
 ## Optional: Segmented Cycle
 
 Shrimps Quest Log works fully without it, and the Segment Cycle Integration section on a quest is hidden entirely unless the Segmented Cycle module is installed and active. When it is, tie a quest to Day, Night, or the custom bar; every segment that bar fills in Segmented Cycle ticks that quest's counter forward by the same amount, up to whatever you allocated.
-
-## Known limitations (still untested live)
-
-This was built and syntax checked outside of Foundry; there is still no Foundry instance available to test it live from here, same as with Segmented Cycle originally. Likely rough edges:
-
-- **The toolbar button** uses the same `getSceneControlButtons` approach as Segmented Cycle, covering both the v11/v12 and v13+ shapes of that hook. If no "Shrimps Quest Log" tool shows up in the Notes group, tell me and it gets fixed for your version.
-- **Simple Calendar's API** varies between its own versions; `currentDateTimeDisplay()` is used defensively (wrapped so a failure just falls back to Shrimps Quest Log's own calendar) but hasn't been checked against a real install.
-- **Segmented Cycle's tick detection** works by watching its `dayFilled`/`nightFilled`/`customFilled` world settings for changes and diffing against the last known value, since Segmented Cycle doesn't expose a dedicated API for this. It should track normal pip clicks and resets correctly, but hasn't been checked against a real install either.
-- **Player notes need a GM online**, as explained above; there's no offline queueing yet.
-- The window uses Foundry's classic `Application` class (like Segmented Cycle's settings form) for broad version compatibility; on the newest Foundry versions this may log a deprecation warning in the console, it should still work.
-
-Report back what breaks and it gets fixed from there.
