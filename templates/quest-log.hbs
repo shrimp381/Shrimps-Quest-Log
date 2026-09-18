@@ -1,0 +1,477 @@
+<div class="quest-log-root">
+
+  <!-- Top bar -->
+  <div class="ql-topbar">
+    <div class="ql-topbar-left">
+      <span class="ql-title">Shrimps Quest Log</span>
+    </div>
+
+    <div class="ql-topbar-right">
+      {{#if showCalendarSection}}
+        <div class="ql-date-nav">
+          <span class="ql-date-label">In-game date</span>
+          {{#unless scSynced}}
+            <button type="button" data-action="prev-day" title="Previous day" class="ql-icon-btn">&#8592;</button>
+          {{/unless}}
+          <span class="ql-current-date" {{#unless scSynced}}data-action="open-jump-picker"{{/unless}}>{{currentDate}}</span>
+          {{#unless scSynced}}
+            <button type="button" data-action="next-day" title="Next day" class="ql-icon-btn">&#8594;</button>
+          {{/unless}}
+          {{#if scSynced}}
+            <span class="ql-sc-note" title="Date is synced from Simple Calendar">(Simple Calendar)</span>
+          {{/if}}
+
+          {{#if showJumpPicker}}
+            <div class="ql-popover ql-jump-popover">
+              <div class="ql-popover-nav">
+                <button type="button" data-action="jump-prev-month" class="ql-icon-btn">&#8592;</button>
+                <span class="ql-popover-month">{{jumpMonthLabel}}</span>
+                <button type="button" data-action="jump-next-month" class="ql-icon-btn">&#8594;</button>
+              </div>
+              <button type="button" data-action="jump-today" class="ql-ghost-btn ql-center">This month</button>
+              <div class="ql-day-grid">
+                {{#each jumpCells}}
+                  <button type="button" data-action="jump-to-day" data-year="{{this.year}}" data-month="{{this.monthIndex}}" data-day="{{this.day}}" style="{{this.style}}">
+                    {{this.day}}
+                    {{#if this.hasMarks}}<span class="ql-mark-dot"></span>{{/if}}
+                  </button>
+                {{/each}}
+              </div>
+              <div class="ql-popover-footer">
+                <button type="button" data-action="close-jump-picker" class="ql-ghost-btn">Close</button>
+              </div>
+            </div>
+          {{/if}}
+        </div>
+      {{/if}}
+
+      {{#if isGm}}
+        <button type="button" data-action="toggle-config" title="Quest Log settings" class="ql-icon-btn ql-cog-btn">&#9881;</button>
+        <button type="button" data-action="open-add-form" class="ql-primary-btn">+ New Quest</button>
+      {{/if}}
+    </div>
+  </div>
+
+  <!-- Persistent calendar panel, right aligned, in normal flow so it never overlaps anything -->
+  {{#if showCalendarSection}}
+    <div class="ql-calendar-panel-row">
+      <div class="ql-calendar-panel">
+        <div class="ql-calendar-panel-header" style="border-radius:{{calendarHeaderRadius}};">
+          <span>Calendar</span>
+          <button type="button" data-action="toggle-calendar-panel" class="ql-ghost-icon">{{calendarToggleIcon}}</button>
+        </div>
+
+        {{#if calendarPanelOpen}}
+          <div class="ql-calendar-panel-body">
+            <div class="ql-popover-nav">
+              <button type="button" data-action="cal-prev-month" class="ql-icon-btn">&#8592;</button>
+              <span class="ql-popover-month">{{calendarMonthLabel}}</span>
+              <button type="button" data-action="cal-next-month" class="ql-icon-btn">&#8594;</button>
+            </div>
+            <button type="button" data-action="cal-today" class="ql-ghost-btn ql-center">Jump to today</button>
+
+            <div class="ql-day-grid">
+              {{#each calendarCells}}
+                <button type="button" data-action="select-calendar-day" data-key="{{this.key}}" data-year="{{this.year}}" data-month="{{this.monthIndex}}" data-day="{{this.day}}" style="{{this.style}}">
+                  {{this.day}}
+                  {{#if this.hasMarks}}<span class="ql-mark-dot"></span>{{/if}}
+                </button>
+              {{/each}}
+            </div>
+
+            <span class="ql-hint">Click a date to view notes and linked quest deadlines.</span>
+
+            {{#if hasSelectedCalendarDay}}
+              <div class="ql-cal-selected">
+                <span class="ql-cal-selected-label">{{selectedCalendarDayLabel}}</span>
+
+                {{#if hasSelectedLinkedQuests}}
+                  {{#each selectedLinkedQuests}}
+                    <div class="ql-cal-linked-quest">
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#C9A227" stroke-width="2"><circle cx="12" cy="12" r="9"></circle></svg>
+                      {{this.title}} <span class="ql-muted">· {{this.tabLabel}}</span>
+                    </div>
+                  {{/each}}
+                {{/if}}
+
+                {{#each selectedCalendarEvents}}
+                  <div class="ql-cal-event">
+                    <span class="ql-cal-event-text">{{this.text}}</span>
+                    {{#if ../isGm}}
+                      <button type="button" data-action="delete-calendar-event" data-key="{{../selectedCalendarDay}}" data-id="{{this.id}}" class="ql-x-btn">&times;</button>
+                    {{/if}}
+                  </div>
+                {{/each}}
+
+                {{#if isGm}}
+                  <div class="ql-inline-form">
+                    <input type="text" data-action="calendar-event-draft-change" value="{{calendarEventDraft}}" placeholder="Add a note for this date...">
+                    <button type="button" data-action="add-calendar-event" class="ql-small-btn">Add</button>
+                  </div>
+                {{/if}}
+              </div>
+            {{/if}}
+          </div>
+        {{/if}}
+      </div>
+    </div>
+  {{/if}}
+
+  <!-- Config panel -->
+  {{#if configOpen}}
+    <div class="ql-panel ql-config-panel">
+      <div class="ql-panel-header">
+        <span class="ql-panel-title">Quest Log Settings</span>
+        <button type="button" data-action="close-config" class="ql-x-btn">&times;</button>
+      </div>
+
+      <div class="ql-config-row">
+        <label class="ql-checkbox-label">
+          <input type="checkbox" data-action="toggle-show-calendar-section" {{#if showCalendarSection}}checked{{/if}}>
+          Show in-game calendar section
+        </label>
+        {{#if segmentModuleActive}}
+          <label class="ql-checkbox-label">
+            <input type="checkbox" data-action="toggle-show-segment-section" {{#if showSegmentSection}}checked{{/if}}>
+            Show Segment Cycle integration section
+          </label>
+        {{else}}
+          <span class="ql-hint">Install and enable the Segmented Cycle module to turn on that integration.</span>
+        {{/if}}
+        {{#if scActive}}
+          <label class="ql-checkbox-label">
+            <input type="checkbox" data-action="toggle-use-simple-calendar" {{#if useSimpleCalendar}}checked{{/if}}>
+            Sync the displayed date with Simple Calendar
+          </label>
+        {{/if}}
+      </div>
+
+      <div class="ql-config-calendar-builder">
+        <span class="ql-section-label">Internal Calendar</span>
+        <span class="ql-hint">Drives the top bar date, the calendar panel, and every date stamped on quests and updates, unless Simple Calendar sync is on above.</span>
+
+        <label class="ql-field">
+          Year label
+          <input type="text" data-action="year-label-change" value="{{calendarYearLabel}}">
+        </label>
+
+        <div class="ql-month-rows">
+          {{#each monthRows}}
+            <div class="ql-month-row">
+              <input type="text" data-action="month-name-change" data-idx="{{this.idx}}" value="{{this.name}}">
+              <input type="number" data-action="month-days-change" data-idx="{{this.idx}}" value="{{this.days}}" min="1">
+              <span class="ql-hint">days</span>
+              {{#if this.canDelete}}
+                <button type="button" data-action="delete-month" data-idx="{{this.idx}}" title="Delete month" class="ql-x-btn">&times;</button>
+              {{/if}}
+            </div>
+          {{/each}}
+        </div>
+
+        <button type="button" data-action="add-month" class="ql-ghost-btn">+ Add Month</button>
+      </div>
+    </div>
+  {{/if}}
+
+  <!-- Tabs -->
+  <div class="ql-tabs-row">
+    {{#each tabButtons}}
+      <div class="ql-tab-group">
+        {{#if this.isEditing}}
+          <input type="text" data-action="tab-name-draft-change" value="{{this.nameDraft}}" class="ql-tab-rename-input">
+          <button type="button" data-action="confirm-rename-tab" class="ql-small-btn">Save</button>
+          <button type="button" data-action="cancel-rename-tab" class="ql-small-btn ql-ghost">Cancel</button>
+        {{else}}
+          <button type="button" data-action="set-tab" data-key="{{this.key}}" style="{{this.style}}">
+            {{this.label}} <span class="ql-tab-count">({{this.count}})</span>
+          </button>
+          {{#if this.canManage}}
+            <button type="button" data-action="start-rename-tab" data-key="{{this.key}}" title="Rename tab" class="ql-ghost-icon">&#9998;</button>
+            <button type="button" data-action="delete-tab" data-key="{{this.key}}" title="Delete tab" class="ql-ghost-icon">&times;</button>
+          {{/if}}
+        {{/if}}
+      </div>
+    {{/each}}
+
+    {{#if showTabAdmin}}
+      {{#if showAddTabInput}}
+        <input type="text" data-action="new-tab-draft-change" value="{{newTabDraft}}" placeholder="Section name" class="ql-tab-rename-input">
+        <button type="button" data-action="add-tab" class="ql-small-btn">Add</button>
+        <button type="button" data-action="cancel-add-tab-input" class="ql-small-btn ql-ghost">Cancel</button>
+      {{else}}
+        <button type="button" data-action="open-add-tab-input" class="ql-dashed-btn">+ Tab</button>
+      {{/if}}
+    {{/if}}
+  </div>
+
+  <!-- Category chips -->
+  <div class="ql-category-row">
+    {{#each categoryChips}}
+      <div class="ql-chip-group">
+        <button type="button" data-action="set-category" data-cat="{{this.key}}" style="{{this.style}}">{{this.label}}</button>
+        {{#if this.canDelete}}
+          <button type="button" data-action="delete-category" data-cat="{{this.key}}" title="Delete category" class="ql-ghost-icon ql-small">&times;</button>
+        {{/if}}
+      </div>
+    {{/each}}
+
+    {{#if showCategoryAdmin}}
+      {{#if showCatInput}}
+        <input type="text" data-action="cat-draft-change" value="{{catDraft}}" placeholder="Category name" class="ql-chip-input">
+        <button type="button" data-action="add-category" class="ql-small-btn">Add</button>
+        <button type="button" data-action="cancel-category-input" class="ql-small-btn ql-ghost">Cancel</button>
+      {{else}}
+        <button type="button" data-action="open-category-input" class="ql-dashed-btn ql-round">+ Category</button>
+      {{/if}}
+    {{/if}}
+  </div>
+
+  <!-- Add quest form -->
+  {{#if showAddForm}}
+    <div class="ql-panel ql-add-form">
+      <span class="ql-panel-title">New Quest Entry</span>
+
+      <div class="ql-form-row">
+        <label class="ql-field ql-grow-2">
+          Title
+          <input type="text" data-action="draft-title-change" value="{{draft.title}}">
+        </label>
+        <label class="ql-field ql-grow-1">
+          Section
+          <select data-action="draft-tab-change">
+            {{#each sectionOptions}}
+              <option value="{{this.key}}" {{#eq this.key ../draft.tab}}selected{{/eq}}>{{this.label}}</option>
+            {{/each}}
+          </select>
+        </label>
+        <label class="ql-field ql-grow-1">
+          Category
+          <select data-action="draft-category-change">
+            {{#each draftCategoryOptions}}
+              <option value="{{this}}" {{#eq this ../draft.category}}selected{{/eq}}>{{this}}</option>
+            {{/each}}
+          </select>
+        </label>
+      </div>
+
+      <label class="ql-field">
+        Summary (shown in the collapsed row)
+        <input type="text" data-action="draft-summary-change" value="{{draft.summary}}">
+      </label>
+
+      <div class="ql-form-actions">
+        <button type="button" data-action="close-add-form" class="ql-ghost-btn">Cancel</button>
+        <button type="button" data-action="submit-quest" class="ql-primary-btn">Log Quest</button>
+      </div>
+      <span class="ql-hint">Will be stamped with today's date, {{currentDate}}.</span>
+    </div>
+  {{/if}}
+
+  <!-- Quest cards -->
+  <div class="ql-quest-list">
+    {{#each questCards}}
+      <div class="ql-quest-card" style="{{this.cardStyle}}" data-quest-id="{{this.id}}">
+
+        <div class="ql-quest-summary-row" data-action="toggle-expand">
+          <span class="ql-status-dot" style="{{this.dotStyle}}"></span>
+          <span class="ql-quest-title" style="{{this.titleStyle}}">{{this.title}}</span>
+          <span class="ql-category-chip">{{this.category}}</span>
+
+          {{#if this.showOrigin}}
+            <span class="ql-origin-chip">{{this.originLabel}}</span>
+          {{/if}}
+
+          {{#if this.showSegmentChip}}
+            <span class="ql-segment-chip" title="Segment cycle allocation">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#C9A227" stroke-width="2"><circle cx="12" cy="12" r="9"></circle></svg>
+              {{this.segmentSummary}}
+            </span>
+          {{/if}}
+
+          {{#if this.showLinkedChip}}
+            <span class="ql-linked-chip" title="Linked calendar date">{{this.linkedDateLabel}}</span>
+          {{/if}}
+
+          <span class="ql-date-logged">{{this.dateLogged}}</span>
+          <span class="ql-chevron">{{this.chevron}}</span>
+        </div>
+
+        {{#if this.isExpanded}}
+          <div class="ql-quest-body">
+            <p class="ql-summary-text">{{this.summary}}</p>
+
+            {{#if this.showGmSection}}
+              <div class="ql-block ql-updates-block">
+                <span class="ql-block-title ql-red">Quest Updates {{this.updatesHint}}</span>
+                {{#each this.updates}}
+                  <div class="ql-update-row">
+                    <div class="ql-update-text-col">
+                      <span style="{{this.textStyle}}">{{this.text}}</span>
+                      <span class="ql-meta-line">{{this.metaLine}}</span>
+                    </div>
+                    <button type="button" data-action="toggle-reveal" data-note-id="{{this.id}}" style="{{this.revealBtnStyle}}">{{this.revealLabel}}</button>
+                    <button type="button" data-action="delete-update" data-note-id="{{this.id}}" class="ql-delete-btn">Delete</button>
+                  </div>
+                {{/each}}
+                <div class="ql-inline-form">
+                  <input type="text" data-action="update-draft-change" value="{{this.updateDraft}}" placeholder="Write an update, revealed to players only once you toggle it...">
+                  <button type="button" data-action="add-update" class="ql-small-btn ql-red-btn">Add</button>
+                </div>
+              </div>
+            {{/if}}
+
+            {{#if this.showRevealedOnly}}
+              <div class="ql-block ql-revealed-block">
+                <span class="ql-block-title ql-gold">Quest Updates</span>
+                {{#each this.revealedNotes}}
+                  <div class="ql-revealed-note">
+                    <span class="ql-revealed-text">{{this.text}}</span>
+                    <span class="ql-meta-line">Revealed {{this.dateRevealed}}</span>
+                  </div>
+                {{/each}}
+              </div>
+            {{/if}}
+
+            <div class="ql-block ql-notes-block">
+              <span class="ql-block-title">Party Notes</span>
+              {{#if this.hasPlayerNotes}}
+                {{#each this.playerNotes}}
+                  <div class="ql-player-note">
+                    <div class="ql-player-note-head">
+                      <span class="ql-note-author">{{this.author}}</span>
+                      <span>{{this.date}}</span>
+                    </div>
+                    <div class="ql-player-note-body">
+                      <span class="ql-note-text">{{this.text}}</span>
+                      {{#if this.canDelete}}
+                        <button type="button" data-action="delete-player-note" data-note-id="{{this.id}}" class="ql-delete-btn">Delete</button>
+                      {{/if}}
+                    </div>
+                  </div>
+                {{/each}}
+              {{/if}}
+              <div class="ql-inline-form">
+                <input type="text" data-action="note-draft-change" value="{{this.noteDraft}}" placeholder="Add a note...">
+                <button type="button" data-action="add-player-note" class="ql-small-btn">Post</button>
+              </div>
+            </div>
+
+            {{#if this.showCalendarLink}}
+              <div class="ql-block ql-link-block">
+                <span class="ql-block-title ql-blue">Calendar Link</span>
+
+                {{#if this.hasLinkedDate}}
+                  <div class="ql-link-row">
+                    <span class="ql-link-text">Linked to {{this.linkedDateFull}}</span>
+                    <button type="button" data-action="open-set-date" class="ql-small-btn ql-ghost">Change</button>
+                    <button type="button" data-action="clear-linked-date" class="ql-small-btn ql-danger">Clear</button>
+                  </div>
+                {{else}}
+                  <div class="ql-link-row">
+                    <span class="ql-hint">Not linked to a date yet.</span>
+                    <button type="button" data-action="open-set-date" class="ql-small-btn ql-blue-btn">Set Date</button>
+                  </div>
+                {{/if}}
+
+                {{#if this.showDatePicker}}
+                  <div class="ql-date-picker-row">
+                    <label class="ql-field ql-narrow">
+                      Year
+                      <input type="number" data-action="quest-date-year-change" value="{{this.datePicker.year}}">
+                    </label>
+                    <label class="ql-field ql-narrow">
+                      Month
+                      <select data-action="quest-date-month-change">
+                        {{#each this.datePicker.monthOptions}}
+                          <option value="{{this.value}}" {{#if this.selected}}selected{{/if}}>{{this.label}}</option>
+                        {{/each}}
+                      </select>
+                    </label>
+                    <label class="ql-field ql-narrow">
+                      Day
+                      <select data-action="quest-date-day-change">
+                        {{#each this.datePicker.dayOptions}}
+                          <option value="{{this.value}}" {{#if this.selected}}selected{{/if}}>{{this.value}}</option>
+                        {{/each}}
+                      </select>
+                    </label>
+                    <button type="button" data-action="quest-date-cancel" class="ql-small-btn ql-ghost">Cancel</button>
+                    <button type="button" data-action="quest-date-confirm" class="ql-small-btn ql-blue-btn">Confirm</button>
+                  </div>
+                {{/if}}
+                {{#if this.scDateNote}}
+                  <span class="ql-hint">Note: the calendar panel uses Quest Log's own internal calendar, even while the date above is synced from Simple Calendar.</span>
+                {{/if}}
+              </div>
+            {{/if}}
+
+            {{#if this.showSegmentPanel}}
+              <div class="ql-block ql-segment-block">
+                <div class="ql-segment-head">
+                  <span class="ql-block-title ql-indigo">Segment Cycle Integration</span>
+                  <label class="ql-checkbox-label">
+                    <input type="checkbox" data-action="toggle-segment-enabled" {{#if this.segment.enabled}}checked{{/if}}>
+                    Enabled
+                  </label>
+                </div>
+
+                {{#if this.segment.enabled}}
+                  <div class="ql-segment-row">
+                    <label class="ql-field ql-narrow">
+                      Bar
+                      <select data-action="segment-bar-change">
+                        {{#each this.segment.barOptions}}
+                          <option value="{{this.value}}" {{#if this.selected}}selected{{/if}}>{{this.label}}</option>
+                        {{/each}}
+                      </select>
+                    </label>
+
+                    <div class="ql-allocated-stepper">
+                      <span>Allocated</span>
+                      <button type="button" data-action="segment-dec" class="ql-pip-btn">&minus;</button>
+                      <span class="ql-allocated-count">{{this.segment.allocated}}</span>
+                      <button type="button" data-action="segment-inc" class="ql-pip-btn">+</button>
+                    </div>
+
+                    <div class="ql-pip-row">
+                      {{#each this.segment.pips}}
+                        <div style="{{this.style}}"></div>
+                      {{/each}}
+                    </div>
+
+                    <span class="ql-ticked-count">{{this.segment.ticked}} / {{this.segment.allocated}} ticked</span>
+
+                    <div class="ql-segment-actions">
+                      <button type="button" data-action="segment-tick" class="ql-small-btn ql-indigo-btn">Force tick</button>
+                      <button type="button" data-action="segment-reset" class="ql-small-btn ql-ghost">Reset</button>
+                    </div>
+                  </div>
+                  <span class="ql-hint">Ticks automatically as the chosen Segmented Cycle bar fills. "Force tick" is a manual override for the GM.</span>
+                {{/if}}
+              </div>
+            {{/if}}
+
+            {{#if this.showGmSection}}
+              <div class="ql-footer-row">
+                <label class="ql-status-label">
+                  Status
+                  <select data-action="status-change">
+                    <option value="active" {{#eq this.status "active"}}selected{{/eq}}>Active</option>
+                    <option value="completed" {{#eq this.status "completed"}}selected{{/eq}}>Completed</option>
+                    <option value="failed" {{#eq this.status "failed"}}selected{{/eq}}>Failed</option>
+                  </select>
+                </label>
+                <button type="button" data-action="delete-quest" class="ql-delete-btn ql-large">Delete Quest</button>
+              </div>
+            {{/if}}
+          </div>
+        {{/if}}
+      </div>
+    {{/each}}
+
+    {{#if noQuests}}
+      <div class="ql-empty-state">No quests logged here yet.</div>
+    {{/if}}
+  </div>
+
+</div>
