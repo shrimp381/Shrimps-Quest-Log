@@ -96,6 +96,15 @@
   font-size: 13px;
 }
 
+/* Chrome renders a <select>'s open dropdown list using whatever
+   background/color is set directly on each <option> (it doesn't inherit
+   the closed control's styling), so without this it falls back to a
+   plain white system popup regardless of the active theme. */
+.quest-log-root select option {
+  background: var(--ql-input-bg);
+  color: var(--ql-text);
+}
+
 .quest-log-root input:focus,
 .quest-log-root select:focus {
   outline: 2px solid rgba(201, 162, 39, 0.5);
